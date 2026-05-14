@@ -1,200 +1,122 @@
-from pathlib import Path
-
-import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
+st.set_page_config(page_title="점심 룰렛", layout="centered")
 
-DATA_PATH = Path(__file__).with_name("score.csv")
-DISPLAY_COLUMNS = ["ID", "반", "이름", "이메일", "연락처", "평균", "등급"]
-GRADE_ORDER = ["A", "B", "C", "D"]
+st.title("🍱 점심 메뉴 룰렛")
 
+menu_data = {
+    "한식": ["김치찌개", "된장찌개", "비빔밥", "불고기", "제제육볶음", "칼국수"],
+    "중식": ["짜장면", "짬뽕", "탕수육", "마파두부", "볶음밥"],
+    "일식": ["초밥", "라멘", "우동", "돈카츠", "가츠동"],
+    "양식": ["파스타", "스테이크", "피자", "햄버거", "리조또"],
+    "분식": ["떡볶이", "순대", "김밥", "라면", "튀김"]
+}
 
-@st.cache_data
-def load_data() -> pd.DataFrame:
-    df = pd.read_csv(DATA_PATH, encoding="cp949")
-    df["반"] = df["반"].astype(str)
-    df["평균"] = pd.to_numeric(df["평균"], errors="coerce")
-    df["등급"] = df["등급"].astype(str)
-    return df
+category = st.sidebar.selectbox("🍽️ 카테고리 선택", list(menu_data.keys()))
+items = menu_data[category]
 
+st.subheader(f"🎯 {category} 룰렛")
 
-def normalize_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    normalized_df = df.copy()
+def render(items):
+    import math
 
-    for column in DISPLAY_COLUMNS:
-        if column not in normalized_df.columns:
-            normalized_df[column] = ""
+    n = len(items)
+    angle = 360 / n
 
-    normalized_df = normalized_df[DISPLAY_COLUMNS]
-    normalized_df["반"] = normalized_df["반"].astype(str).str.strip()
-    normalized_df["등급"] = normalized_df["등급"].astype(str).str.strip().str.upper()
-    normalized_df["평균"] = pd.to_numeric(normalized_df["평균"], errors="coerce")
+    colors = ["#ff9999","#66b3ff","#99ff99","#ffcc99","#c2c2f0","#ffb3e6"]
 
-    return normalized_df
+    # 룰렛 색상
+    conic = ", ".join([
+        f"{colors[i%len(colors)]} {i*angle}deg {(i+1)*angle}deg"
+        for i in range(n)
+    ])
 
+    # 글씨 따로 배치 (핵심)
+    labels = ""
+    for i, item in enumerate(items):
+        rot = i * angle + angle/2
+        labels += f"""
+        <div style="
+            position:absolute;
+            width:100%;
+            height:100%;
+            transform:rotate({rot}deg);
+        ">
+            <div style="
+                position:absolute;
+                left:50%;
+                top:10px;
+                transform:translateX(-50%);
+                font-size:14px;
+                font-weight:bold;
+                white-space:nowrap;
+            ">
+                {item}
+            </div>
+        </div>
+        """
 
-def generate_new_id(existing_ids: set[str]) -> str:
-    next_index = 1
-    while True:
-        candidate = f"user_new_{next_index:03d}"
-        if candidate not in existing_ids:
-            return candidate
-        next_index += 1
+    html = f"""
+    <html>
+    <body style="display:flex;flex-direction:column;align-items:center;">
 
+        <div style="position:relative;">
 
-def apply_editor_changes(
-    original_df: pd.DataFrame,
-    filtered_df: pd.DataFrame,
-    edited_df: pd.DataFrame,
-) -> pd.DataFrame:
-    base_df = normalize_dataframe(original_df)
-    filtered_base_df = normalize_dataframe(filtered_df)
-    edited_base_df = normalize_dataframe(edited_df)
+            <!-- 화살표 -->
+            <div style="
+                position:absolute;
+                top:-18px;
+                left:50%;
+                transform:translateX(-50%);
+                width:0;height:0;
+                border-left:12px solid transparent;
+                border-right:12px solid transparent;
+                border-bottom:20px solid red;
+                z-index:10;
+            "></div>
 
-    filtered_ids = set(filtered_base_df["ID"].dropna().astype(str))
-    existing_ids = set(base_df["ID"].dropna().astype(str))
+            <!-- 룰렛 -->
+            <div id="wheel" style="
+                width:340px;
+                height:340px;
+                border-radius:50%;
+                background: conic-gradient({conic});
+                border:5px solid black;
+                position:relative;
+                transition: transform 4s ease-out;
+            ">
+                {labels}
+            </div>
 
-    remaining_df = base_df[~base_df["ID"].astype(str).isin(filtered_ids)].copy()
-    edited_rows = []
+        </div>
 
-    for _, row in edited_base_df.iterrows():
-        row_dict = row.to_dict()
-        row_id = str(row_dict.get("ID", "")).strip()
-        if not row_id or row_id == "nan" or row_id in {"None", ""}:
-            row_id = generate_new_id(existing_ids)
-        row_dict["ID"] = row_id
-        existing_ids.add(row_id)
-        edited_rows.append(row_dict)
+        <div style="margin-top:25px;">
+            <button onclick="spin()" style="
+                padding:10px 25px;
+                font-size:16px;
+                cursor:pointer;
+            ">🎲 룰렛 돌리기</button>
+        </div>
 
-    merged_df = pd.concat([remaining_df, pd.DataFrame(edited_rows)], ignore_index=True)
-    return normalize_dataframe(merged_df)
+        <script>
+            let wheel = document.getElementById("wheel");
+            let current = 0;
 
+            function spin() {{
+                let deg = Math.floor(2000 + Math.random()*2000);
+                current += deg;
+                wheel.style.transform = "rotate(" + current + "deg)";
+            }}
+        </script>
 
-def get_filtered_dataframe(df: pd.DataFrame) -> pd.DataFrame:
-    class_options = sorted(
-        [class_name for class_name in df["반"].dropna().unique().tolist() if class_name],
-        key=int,
-    )
-    grade_options = [grade for grade in GRADE_ORDER if grade in df["등급"].dropna().unique()]
+    </body>
+    </html>
+    """
 
-    score_series = df["평균"].dropna()
-    min_score = float(score_series.min()) if not score_series.empty else 0.0
-    max_score = float(score_series.max()) if not score_series.empty else 100.0
+    components.html(html, height=650)
 
-    with st.sidebar:
-        st.header("필터")
-        st.subheader("반 선택")
-        selected_classes = [
-            class_name
-            for class_name in class_options
-            if st.checkbox(f"{class_name}반", value=True, key=f"class_{class_name}")
-        ]
-        selected_grades = st.multiselect(
-            "등급 선택",
-            options=grade_options,
-            default=grade_options,
-        )
-        include_absent = st.radio(
-            "결시생 포함 여부",
-            options=["포함", "제외"],
-            index=0,
-            horizontal=True,
-        )
-        selected_score_range = st.slider(
-            "평균 점수 범위",
-            min_value=min_score,
-            max_value=max_score,
-            value=(min_score, max_score),
-            step=0.01,
-        )
+render(items)
 
-    filtered_df = df.copy()
-    filtered_df["결시생"] = filtered_df["평균"].fillna(0).eq(0)
-
-    if selected_classes:
-        filtered_df = filtered_df[filtered_df["반"].isin(selected_classes)]
-    else:
-        filtered_df = filtered_df.iloc[0:0]
-
-    if selected_grades:
-        filtered_df = filtered_df[filtered_df["등급"].isin(selected_grades)]
-    else:
-        filtered_df = filtered_df.iloc[0:0]
-
-    filtered_df = filtered_df[
-        filtered_df["평균"].between(selected_score_range[0], selected_score_range[1], inclusive="both")
-    ]
-
-    if include_absent == "제외":
-        filtered_df = filtered_df[~filtered_df["결시생"]]
-
-    return filtered_df.drop(columns=["결시생"])
-
-
-def main() -> None:
-    st.set_page_config(page_title="성적 데이터 편집 대시보드", layout="wide")
-    st.title("성적 데이터 편집 대시보드")
-
-    if "score_data" not in st.session_state:
-        st.session_state.score_data = normalize_dataframe(load_data())
-
-    filtered_df = get_filtered_dataframe(st.session_state.score_data)
-
-    st.subheader("필터링 결과")
-    edited_df = st.data_editor(
-        filtered_df,
-        use_container_width=True,
-        hide_index=True,
-        num_rows="dynamic",
-        column_config={
-            "반": st.column_config.SelectboxColumn("반", options=["1", "2", "3"], required=True),
-            "등급": st.column_config.SelectboxColumn("등급", options=GRADE_ORDER, required=True),
-            "평균": st.column_config.NumberColumn("평균", min_value=0.0, max_value=100.0, step=0.01, format="%.2f"),
-        },
-        key="score_editor",
-    )
-
-    col1, col2 = st.columns([1, 1])
-    with col1:
-        if st.button("편집 내용 전체 반영", use_container_width=True):
-            st.session_state.score_data = apply_editor_changes(
-                st.session_state.score_data,
-                filtered_df,
-                edited_df,
-            )
-            st.success("현재 필터링 결과를 기준으로 수정/삭제 내용을 반영했습니다.")
-            st.rerun()
-    with col2:
-        if st.button("원본 데이터로 초기화", use_container_width=True):
-            st.session_state.score_data = normalize_dataframe(load_data())
-            st.success("원본 score.csv 기준으로 초기화했습니다.")
-            st.rerun()
-
-    st.caption(
-        "테이블에서 셀 값을 직접 수정할 수 있고, 행을 삭제하거나 새 행을 추가할 수 있습니다. "
-        "반영 버튼을 누르면 현재 필터링된 테이블 기준으로 데이터가 갱신됩니다."
-    )
-
-    stat_df = normalize_dataframe(edited_df)
-    total_count = len(stat_df)
-    average_score = float(stat_df["평균"].dropna().mean()) if total_count else 0.0
-    grade_counts = (
-        stat_df["등급"]
-        .value_counts()
-        .reindex(GRADE_ORDER, fill_value=0)
-        .rename_axis("등급")
-        .reset_index(name="인원수")
-    )
-
-    st.subheader("통계 / 시각화")
-    spacer_left, stats_col, spacer_right = st.columns([1, 2, 1])
-    with stats_col:
-        metric_col1, metric_col2 = st.columns(2)
-        metric_col1.metric("총인원수", f"{total_count}명")
-        metric_col2.metric("평균점수", f"{average_score:.2f}점")
-
-    st.bar_chart(grade_counts.set_index("등급"), use_container_width=True)
-
-
-if __name__ == "__main__":
-    main()
+st.markdown("---")
+st.info("화살표 기준으로 멈춘 위치가 당첨입니다.")
